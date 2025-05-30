@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-import plotly.express as px
-import plotly.graph_objects as go
 
 # Page config
 st.set_page_config(
@@ -144,22 +142,20 @@ def main():
     st.markdown("Generate week-over-week performance reports with customizable metrics and date ranges")
     st.markdown("---")
     
-    # Platform selection tabs
+    # Platform selection
     platforms = list(st.session_state.tables.keys())
-    platform_names = [st.session_state.tables[p]['platform'] for p in platforms]
+    platform_display_names = [st.session_state.tables[p]['platform'] for p in platforms]
     
-    selected_idx = st.tabs(platform_names)
-    
-    # Use radio buttons for platform selection
-    col1, col2, col3 = st.columns([2, 2, 2])
+    # Platform selector
+    col1, col2 = st.columns([2, 4])
     with col1:
-        selected_platform = st.selectbox(
+        selected_idx = st.selectbox(
             "Select Platform:",
-            platforms,
-            format_func=lambda x: st.session_state.tables[x]['platform'],
-            index=platforms.index(st.session_state.active_table)
+            range(len(platforms)),
+            format_func=lambda x: platform_display_names[x],
+            index=platforms.index(st.session_state.active_table) if st.session_state.active_table in platforms else 0
         )
-        st.session_state.active_table = selected_platform
+        st.session_state.active_table = platforms[selected_idx]
     
     current_table = st.session_state.tables[st.session_state.active_table]
     
@@ -175,54 +171,51 @@ def main():
     
     st.markdown("---")
     
-    # Controls
+    # Controls in columns
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        if st.button("➕ Add Custom Metric"):
-            st.session_state.show_add_metric = True
+        add_metric = st.button("➕ Add Custom Metric")
     
     with col2:
-        if st.button("📅 Add Custom Column"):
-            st.session_state.show_add_column = True
+        add_column = st.button("📅 Add Custom Column")
     
     with col3:
-        if st.button("💾 Export CSV"):
-            # Create CSV export
-            export_data = []
-            for metric_key, metric in current_table['metrics'].items():
-                row = {'Metric': metric['name']}
-                for column in current_table['columns']:
-                    if metric['type'] == 'calculated':
-                        raw_data = {k: current_table['data'][k][column['name']] 
-                                  for k in current_table['data'].keys()}
-                        value = calculate_metric(metric_key, raw_data)
-                    else:
-                        value = current_table['data'][metric_key][column['name']]
-                    
-                    row[f"{column['name']} ({column['display_name']})"] = format_value(value, metric['format'])
-                export_data.append(row)
-            
-            df_export = pd.DataFrame(export_data)
-            csv = df_export.to_csv(index=False)
-            
-            st.download_button(
-                label="📥 Download CSV",
-                data=csv,
-                file_name=f"{st.session_state.active_table}_report_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv"
-            )
-    
-    with col4:
         if st.button("🔄 Reset Table"):
             st.session_state.tables[st.session_state.active_table] = create_initial_table(
                 current_table['platform']
             )
             st.rerun()
     
-    # Add metric modal
-    if getattr(st.session_state, 'show_add_metric', False):
-        with st.form("add_metric_form"):
+    with col4:
+        # Export functionality
+        export_data = []
+        for metric_key, metric in current_table['metrics'].items():
+            row = {'Metric': metric['name']}
+            for column in current_table['columns']:
+                if metric['type'] == 'calculated':
+                    raw_data = {k: current_table['data'][k][column['name']] 
+                              for k in current_table['data'].keys()}
+                    value = calculate_metric(metric_key, raw_data)
+                else:
+                    value = current_table['data'][metric_key][column['name']]
+                
+                row[f"{column['name']} ({column['display_name']})"] = format_value(value, metric['format'])
+            export_data.append(row)
+        
+        df_export = pd.DataFrame(export_data)
+        csv = df_export.to_csv(index=False)
+        
+        st.download_button(
+            label="💾 Export CSV",
+            data=csv,
+            file_name=f"{st.session_state.active_table}_report_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
+    
+    # Add metric functionality
+    if add_metric:
+        with st.form("add_metric_form", clear_on_submit=True):
             st.subheader("Add Custom Metric")
             new_metric_name = st.text_input("Metric Name:")
             metric_format = st.selectbox("Format:", ['number', 'currency', 'percentage', 'ratio'])
@@ -231,7 +224,7 @@ def main():
             with col1:
                 if st.form_submit_button("Add Metric"):
                     if new_metric_name:
-                        metric_key = new_metric_name.lower().replace(' ', '_')
+                        metric_key = new_metric_name.lower().replace(' ', '_').replace('-', '_')
                         current_table['metrics'][metric_key] = {
                             'name': new_metric_name,
                             'type': 'raw',
@@ -240,21 +233,16 @@ def main():
                         current_table['data'][metric_key] = {
                             col['name']: 0.0 for col in current_table['columns']
                         }
-                        st.session_state.show_add_metric = False
+                        st.success(f"Added metric: {new_metric_name}")
                         st.rerun()
-            
-            with col2:
-                if st.form_submit_button("Cancel"):
-                    st.session_state.show_add_metric = False
-                    st.rerun()
     
-    # Add column modal
-    if getattr(st.session_state, 'show_add_column', False):
-        with st.form("add_column_form"):
+    # Add column functionality
+    if add_column:
+        with st.form("add_column_form", clear_on_submit=True):
             st.subheader("Add Custom Column")
             new_column_name = st.text_input("Column Name:")
-            start_date = st.date_input("Start Date:")
-            end_date = st.date_input("End Date:")
+            start_date = st.date_input("Start Date:", value=datetime.now().date())
+            end_date = st.date_input("End Date:", value=datetime.now().date())
             
             col1, col2 = st.columns(2)
             with col1:
@@ -272,46 +260,77 @@ def main():
                         for metric_key in current_table['data']:
                             current_table['data'][metric_key][new_column_name] = 0.0
                         
-                        st.session_state.show_add_column = False
+                        st.success(f"Added column: {new_column_name}")
                         st.rerun()
-            
-            with col2:
-                if st.form_submit_button("Cancel"):
-                    st.session_state.show_add_column = False
-                    st.rerun()
     
     st.markdown("---")
     
     # Data table
-    st.subheader("📊 Performance Data")
+    st.subheader("📊 Performance Data Table")
     
-    # Create editable data table
-    metrics_list = list(current_table['metrics'].items())
-    
-    # Create columns for the table
-    cols = st.columns([2] + [1] * len(current_table['columns']))
+    # Create a properly aligned table using HTML
+    table_html = "<table style='width: 100%; border-collapse: collapse; margin: 20px 0;'>"
     
     # Header row
-    cols[0].markdown("**Metric**")
-    for i, column in enumerate(current_table['columns']):
-        cols[i+1].markdown(f"**{column['name']}**")
-        cols[i+1].caption(column['display_name'])
+    table_html += "<tr style='background-color: #f0f2f6; border-bottom: 2px solid #ddd;'>"
+    table_html += "<th style='text-align: left; padding: 12px; font-weight: bold; border-right: 1px solid #ddd;'>Metric</th>"
+    
+    for column in current_table['columns']:
+        table_html += f"<th style='text-align: center; padding: 12px; font-weight: bold; border-right: 1px solid #ddd;'>"
+        table_html += f"{column['name']}<br><small style='color: #666; font-weight: normal;'>({column['display_name']})</small></th>"
+    
+    table_html += "</tr>"
     
     # Data rows
-    for metric_key, metric in metrics_list:
-        cols[0].markdown(f"{metric['name']}" + (" 🧮" if metric['type'] == 'calculated' else ""))
+    for metric_key, metric in current_table['metrics'].items():
+        bg_color = "#f8f9ff" if metric['type'] == 'calculated' else "#ffffff"
+        metric_icon = " 🧮" if metric['type'] == 'calculated' else ""
         
-        for i, column in enumerate(current_table['columns']):
+        table_html += f"<tr style='background-color: {bg_color}; border-bottom: 1px solid #eee;'>"
+        table_html += f"<td style='text-align: left; padding: 12px; font-weight: 500; border-right: 1px solid #ddd; background-color: #f8f9fa;'>{metric['name']}{metric_icon}</td>"
+        
+        for column in current_table['columns']:
             if metric['type'] == 'calculated':
-                # Calculate value
                 raw_data = {k: current_table['data'][k][column['name']] for k in current_table['data'].keys()}
                 value = calculate_metric(metric_key, raw_data)
-                cols[i+1].markdown(f"*{format_value(value, metric['format'])}*")
+                formatted_value = format_value(value, metric['format'])
+                table_html += f"<td style='text-align: center; padding: 12px; border-right: 1px solid #ddd; font-style: italic; color: #2563eb;'>{formatted_value}</td>"
             else:
-                # Editable raw value
+                value = current_table['data'][metric_key][column['name']]
+                formatted_value = format_value(value, metric['format'])
+                table_html += f"<td style='text-align: center; padding: 12px; border-right: 1px solid #ddd;'>{formatted_value}</td>"
+        
+        table_html += "</tr>"
+    
+    table_html += "</table>"
+    
+    # Display the HTML table
+    st.markdown(table_html, unsafe_allow_html=True)
+    
+    # Editable inputs section
+    st.subheader("✏️ Edit Raw Metrics")
+    st.markdown("*Only raw metrics can be edited. Calculated metrics (🧮) update automatically.*")
+    
+    # Create input fields for raw metrics only
+    raw_metrics = {k: v for k, v in current_table['metrics'].items() if v['type'] == 'raw'}
+    
+    if raw_metrics:
+        cols = st.columns(len(current_table['columns']))
+        
+        # Column headers
+        for i, column in enumerate(current_table['columns']):
+            cols[i].markdown(f"**{column['name']}**")
+            cols[i].caption(column['display_name'])
+        
+        # Input fields for each raw metric
+        for metric_key, metric in raw_metrics.items():
+            st.markdown(f"**{metric['name']}**")
+            cols = st.columns(len(current_table['columns']))
+            
+            for i, column in enumerate(current_table['columns']):
                 current_value = current_table['data'][metric_key][column['name']]
-                new_value = cols[i+1].number_input(
-                    f"{metric_key}_{column['name']}",
+                new_value = cols[i].number_input(
+                    f"{metric['name']} - {column['name']}",
                     value=float(current_value),
                     step=0.01,
                     key=f"input_{metric_key}_{column['name']}_{st.session_state.active_table}",
@@ -321,30 +340,58 @@ def main():
     
     # Quick stats
     st.markdown("---")
-    st.subheader("📈 Quick Stats")
+    st.subheader("📈 Quick Stats (Current Week)")
     
-    # Calculate totals for Week 1
     if current_table['columns']:
-        week1_data = {k: current_table['data'][k][current_table['columns'][0]['name']] 
-                     for k in current_table['data'].keys()}
+        current_week = current_table['columns'][-1]['name']  # Most recent week
+        week_data = {k: current_table['data'][k][current_week] for k in current_table['data'].keys()}
         
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            spend = week1_data.get('spend', 0)
+            spend = week_data.get('spend', 0)
             st.metric("Total Spend", format_value(spend, 'currency'))
         
         with col2:
-            clicks = week1_data.get('clicks', 0)
+            clicks = week_data.get('clicks', 0)
             st.metric("Total Clicks", format_value(clicks, 'number'))
         
         with col3:
-            ctr = calculate_metric('ctr', week1_data)
+            ctr = calculate_metric('ctr', week_data)
             st.metric("CTR", format_value(ctr, 'percentage'))
         
         with col4:
-            roas = calculate_metric('roas', week1_data)
+            roas = calculate_metric('roas', week_data)
             st.metric("ROAS", format_value(roas, 'ratio'))
+    
+    # Instructions
+    st.markdown("---")
+    st.subheader("📋 How to Use")
+    with st.expander("Click to see instructions"):
+        st.markdown("""
+        **Getting Started:**
+        1. Select a platform from the dropdown (Facebook, Google, etc.)
+        2. Edit the platform summary to add insights and notes
+        3. Enter your data in the "Edit Raw Metrics" section below the table
+        4. Watch calculated metrics (🧮) update automatically
+        
+        **Customization:**
+        - **Add Custom Metric**: Create your own metrics like "Brand Awareness Score"
+        - **Add Custom Column**: Add custom time periods or campaigns
+        - **Export CSV**: Download your data for external analysis
+        - **Reset Table**: Clear all data and start fresh
+        
+        **Calculated Metrics (🧮):**
+        - CTR = (Clicks ÷ Impressions) × 100
+        - CPM = (Spend ÷ Impressions) × 1000  
+        - CPC = Spend ÷ Clicks
+        - ROAS = Purchase Revenue ÷ Spend
+        - And more...
+        
+        **Next Steps:**
+        - Use this dashboard for manual reporting while setting up API automation
+        - Later we can connect Facebook, Google, and other platform APIs to auto-fill data
+        """)
 
 if __name__ == "__main__":
     main()
