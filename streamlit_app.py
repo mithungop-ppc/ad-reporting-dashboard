@@ -656,9 +656,9 @@ def update_facebook_data_from_api():
                         facebook_table['data'][metric][column['name']] = api_data[metric]
                         facebook_table['data_source'][metric][column['name']] = 'api'
                 
-                st.success(f"✅ Updated {column['name']} with Facebook API data")
+                st.success(f"Updated {column['name']} with Facebook API data")
             else:
-                st.warning(f"⚠️ Could not fetch data for {column['name']}")
+                st.warning(f"Could not fetch data for {column['name']}")
 
 def main():
     # Initialize tables
@@ -1058,43 +1058,6 @@ def main():
         
         # Display the HTML table
         st.markdown(table_html, unsafe_allow_html=True)
-        else:
-                value = current_table['data'][metric_key][column['name']]
-                formatted_value = format_value(value, metric['format'])
-                
-                # Add data source indicator
-                source = current_table.get('data_source', {}).get(metric_key, {}).get(column['name'], 'manual')
-                
-                if source == 'api':
-                    cell_class = "sf-table-api"
-                    status_html = f"<span class='status-api'>🤖 {formatted_value}</span>"
-                else:
-                    cell_class = ""
-                    status_html = f"<span class='status-manual'>✋ {formatted_value}</span>"
-                
-                table_html += f"<td class='{cell_class}' style='text-align: center;'>{status_html}</td>"
-        
-        table_html += "</tr>"
-    
-    table_html += "</table>"
-    
-    # Legend
-    st.markdown("""
-    <div class="legend">
-        <div class="legend-item">
-            <span class="status-calculated">🧮 Auto-calculated</span>
-        </div>
-        <div class="legend-item">
-            <span class="status-api">🤖 From Facebook API</span>
-        </div>
-        <div class="legend-item">
-            <span class="status-manual">✋ Manual input</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Display the HTML table
-    st.markdown(table_html, unsafe_allow_html=True)
     
     # Editable inputs section with toggle
     col1, col2 = st.columns([6, 1])
