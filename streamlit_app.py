@@ -664,10 +664,22 @@ def main():
     # Initialize tables
     initialize_tables()
     
+    # Initialize section visibility state
+    if 'section_visibility' not in st.session_state:
+        st.session_state.section_visibility = {
+            'summary': True,
+            'controls': True,
+            'date_config': True,
+            'data_table': True,
+            'edit_metrics': True,
+            'quick_stats': True,
+            'instructions': False
+        }
+
     # Header with Salesforce styling
     st.markdown("""
     <div class="sf-header">
-        <h1>⚡ Ad Reporting Dashboard</h1>
+        <h1>Ad Reporting Dashboard</h1>
         <p>Generate comprehensive week-over-week performance reports with automated Facebook data and customizable metrics</p>
     </div>
     """, unsafe_allow_html=True)
@@ -677,7 +689,7 @@ def main():
         st.markdown("""
         <div class="sf-card">
             <div class="sf-card-header">
-                <h3 class="sf-card-title">🔧 Facebook API Configuration</h3>
+                <h3 class="sf-card-title">Facebook API Configuration</h3>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -700,26 +712,26 @@ def main():
         st.session_state.facebook_credentials['account_id'] = fb_account_id
         
         # Test connection
-        if st.button("🧪 Test Facebook Connection", help="Verify your API credentials"):
+        if st.button("Test Facebook Connection", help="Verify your API credentials"):
             if fb_token and fb_account_id:
                 test_data = fetch_facebook_data("2024-01-01", "2024-01-01")
                 if test_data is not None:
-                    st.markdown('<div class="success-message">✅ Facebook API connected successfully!</div>', unsafe_allow_html=True)
+                    st.markdown('<div class="success-message">Facebook API connected successfully!</div>', unsafe_allow_html=True)
                 else:
-                    st.markdown('<div class="error-message">❌ Facebook API connection failed</div>', unsafe_allow_html=True)
+                    st.markdown('<div class="error-message">Facebook API connection failed</div>', unsafe_allow_html=True)
             else:
-                st.markdown('<div class="warning-message">⚠️ Please enter both token and account ID</div>', unsafe_allow_html=True)
+                st.markdown('<div class="warning-message">Please enter both token and account ID</div>', unsafe_allow_html=True)
         
         st.markdown("---")
         
         # Facebook Auto-Pull
         if st.session_state.active_table == 'facebook':
-            st.markdown("### 📡 Auto-Pull Facebook Data")
-            if st.button("🔄 Fetch All Facebook Data", type="primary", help="Pull data for all date ranges"):
+            st.markdown("### Auto-Pull Facebook Data")
+            if st.button("Fetch All Facebook Data", type="primary", help="Pull data for all date ranges"):
                 if fb_token and fb_account_id:
                     update_facebook_data_from_api()
                 else:
-                    st.markdown('<div class="error-message">❌ Please configure Facebook credentials first</div>', unsafe_allow_html=True)
+                    st.markdown('<div class="error-message">Please configure Facebook credentials first</div>', unsafe_allow_html=True)
     
     # Platform selection with tabs
     platforms = list(st.session_state.tables.keys())
@@ -753,85 +765,103 @@ def main():
     
     current_table = st.session_state.tables[st.session_state.active_table]
     
-    # Summary section
-    st.markdown(f"""
-    <div class="sf-card">
-        <div class="sf-card-header">
-            <h3 class="sf-card-title">📝 {current_table['platform']} Summary</h3>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    summary_text = st.text_area(
-        "Platform Summary:",
-        value=current_table['summary'],
-        height=100,
-        key=f"summary_{st.session_state.active_table}",
-        label_visibility="collapsed"
-    )
-    current_table['summary'] = summary_text
-    
-    # Controls section
-    st.markdown("""
-    <div class="sf-card">
-        <div class="sf-card-header">
-            <h3 class="sf-card-title">⚙️ Table Controls</h3>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
+    # Summary section with toggle
+    col1, col2 = st.columns([6, 1])
     with col1:
-        add_metric = st.button("➕ Add Custom Metric", help="Create a new metric for tracking")
-    
+        st.markdown(f"### {current_table['platform']} Summary")
     with col2:
-        add_column = st.button("📅 Add Custom Column", help="Add a new time period column")
+        if st.button("Show/Hide" if st.session_state.section_visibility['summary'] else "Show/Hide", 
+                    key="toggle_summary"):
+            st.session_state.section_visibility['summary'] = not st.session_state.section_visibility['summary']
     
-    with col3:
-        if st.button("🔄 Reset Table", help="Reset table to default state"):
-            st.session_state.tables[st.session_state.active_table] = create_initial_table(
-                current_table['platform']
-            )
-            st.rerun()
-    
-    with col4:
-        # Export functionality
-        export_data = []
-        for metric_key, metric in current_table['metrics'].items():
-            row = {'Metric': metric['name']}
-            for column in current_table['columns']:
-                if metric['type'] == 'calculated':
-                    raw_data = {k: current_table['data'][k][column['name']] 
-                              for k in current_table['data'].keys()}
-                    value = calculate_metric(metric_key, raw_data)
-                else:
-                    value = current_table['data'][metric_key][column['name']]
-                
-                # Add data source indicator
-                source = current_table.get('data_source', {}).get(metric_key, {}).get(column['name'], 'manual')
-                source_indicator = " 🤖" if source == 'api' else ""
-                
-                row[f"{column['name']} ({column['display_name']})"] = format_value(value, metric['format']) + source_indicator
-            export_data.append(row)
+    if st.session_state.section_visibility['summary']:
+        st.markdown(f"""
+        <div class="sf-card">
+            <div class="sf-card-header">
+                <h3 class="sf-card-title">{current_table['platform']} Summary</h3>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         
-        df_export = pd.DataFrame(export_data)
-        csv = df_export.to_csv(index=False)
-        
-        st.download_button(
-            label="💾 Export CSV",
-            data=csv,
-            file_name=f"{st.session_state.active_table}_report_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            help="Download current table data as CSV"
+        summary_text = st.text_area(
+            "Platform Summary:",
+            value=current_table['summary'],
+            height=100,
+            key=f"summary_{st.session_state.active_table}",
+            label_visibility="collapsed"
         )
+        current_table['summary'] = summary_text
     
-    # Add metric functionality
-    if add_metric:
+    # Controls section with toggle
+    col1, col2 = st.columns([6, 1])
+    with col1:
+        st.markdown("### Table Controls")
+    with col2:
+        if st.button("Show/Hide" if st.session_state.section_visibility['controls'] else "Show/Hide", 
+                    key="toggle_controls"):
+            st.session_state.section_visibility['controls'] = not st.session_state.section_visibility['controls']
+    
+    if st.session_state.section_visibility['controls']:
         st.markdown("""
         <div class="sf-card">
             <div class="sf-card-header">
-                <h3 class="sf-card-title">➕ Add Custom Metric</h3>
+                <h3 class="sf-card-title">Table Controls</h3>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            add_metric = st.button("Add Custom Metric", help="Create a new metric for tracking")
+        
+        with col2:
+            add_column = st.button("Add Custom Column", help="Add a new time period column")
+        
+        with col3:
+            if st.button("Reset Table", help="Reset table to default state"):
+                st.session_state.tables[st.session_state.active_table] = create_initial_table(
+                    current_table['platform']
+                )
+                st.rerun()
+        
+        with col4:
+            # Export functionality
+            export_data = []
+            for metric_key, metric in current_table['metrics'].items():
+                row = {'Metric': metric['name']}
+                for column in current_table['columns']:
+                    if metric['type'] == 'calculated':
+                        raw_data = {k: current_table['data'][k][column['name']] 
+                                  for k in current_table['data'].keys()}
+                        value = calculate_metric(metric_key, raw_data)
+                    else:
+                        value = current_table['data'][metric_key][column['name']]
+                    
+                    # Add data source indicator
+                    source = current_table.get('data_source', {}).get(metric_key, {}).get(column['name'], 'manual')
+                    source_indicator = " (API)" if source == 'api' else ""
+                    
+                    row[f"{column['name']} ({column['display_name']})"] = format_value(value, metric['format']) + source_indicator
+                export_data.append(row)
+            
+            df_export = pd.DataFrame(export_data)
+            csv = df_export.to_csv(index=False)
+            
+            st.download_button(
+                label="Export CSV",
+                data=csv,
+                file_name=f"{st.session_state.active_table}_report_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                help="Download current table data as CSV"
+            )
+    
+    # Add metric functionality
+    if 'add_metric' in locals() and add_metric:
+        st.markdown("""
+        <div class="sf-card">
+            <div class="sf-card-header">
+                <h3 class="sf-card-title">Add Custom Metric</h3>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -863,11 +893,11 @@ def main():
                     st.rerun()
     
     # Add column functionality
-    if add_column:
+    if 'add_column' in locals() and add_column:
         st.markdown("""
         <div class="sf-card">
             <div class="sf-card-header">
-                <h3 class="sf-card-title">📅 Add Custom Column</h3>
+                <h3 class="sf-card-title">Add Custom Column</h3>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -903,85 +933,131 @@ def main():
                 if st.form_submit_button("Cancel"):
                     st.rerun()
     
-    # Data table section
-    st.markdown("""
-    <div class="sf-card">
-        <div class="sf-card-header">
-            <h3 class="sf-card-title">📊 Performance Data Table</h3>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # Date range configuration section with toggle
+    col1, col2 = st.columns([6, 1])
+    with col1:
+        st.markdown("### Date Range Configuration")
+    with col2:
+        if st.button("Show/Hide" if st.session_state.section_visibility['date_config'] else "Show/Hide", 
+                    key="toggle_date_config"):
+            st.session_state.section_visibility['date_config'] = not st.session_state.section_visibility['date_config']
     
-    # Date pickers for each column
-    st.markdown("### 📅 Date Range Configuration")
-    date_cols = st.columns(len(current_table['columns']))
-    
-    for i, column in enumerate(current_table['columns']):
-        with date_cols[i]:
-            st.markdown(f"""
-            <div class="date-picker-container">
-                <div class="date-range-label">{column['name']}</div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Parse current dates
-            current_start = datetime.strptime(column['start_date'], '%Y-%m-%d').date()
-            current_end = datetime.strptime(column['end_date'], '%Y-%m-%d').date()
-            
-            # Date inputs
-            new_start = st.date_input(
-                f"Start",
-                value=current_start,
-                key=f"start_{column['name']}_{st.session_state.active_table}",
-                label_visibility="collapsed"
-            )
-            
-            new_end = st.date_input(
-                f"End",
-                value=current_end,
-                key=f"end_{column['name']}_{st.session_state.active_table}",
-                label_visibility="collapsed"
-            )
-            
-            # Update dates if changed
-            if new_start != current_start or new_end != current_end:
-                current_table['columns'][i]['start_date'] = new_start.strftime('%Y-%m-%d')
-                current_table['columns'][i]['end_date'] = new_end.strftime('%Y-%m-%d')
-                current_table['columns'][i]['display_name'] = f"{new_start.strftime('%m/%d')} - {new_end.strftime('%m/%d')}"
-    
-    # Create the main data table
-    table_html = "<table class='sf-table'>"
-    
-    # Header row
-    table_html += "<tr>"
-    table_html += "<th style='text-align: left; min-width: 200px;'>Metric</th>"
-    
-    for column in current_table['columns']:
-        table_html += f"<th style='text-align: center; min-width: 150px;'>"
-        table_html += f"<strong>{column['name']}</strong><br>"
-        table_html += f"<small style='color: #706e6b; font-weight: normal;'>{column['display_name']}</small></th>"
-    
-    table_html += "</tr>"
-    
-    # Data rows
-    for metric_key, metric in current_table['metrics'].items():
-        if metric['type'] == 'calculated':
-            row_class = "sf-table-calculated"
-            metric_icon = " 🧮"
-        else:
-            row_class = ""
-            metric_icon = ""
+    if st.session_state.section_visibility['date_config']:
+        date_cols = st.columns(len(current_table['columns']))
         
-        table_html += f"<tr class='{row_class}'>"
-        table_html += f"<td class='sf-table-metric'>{metric['name']}{metric_icon}</td>"
+        for i, column in enumerate(current_table['columns']):
+            with date_cols[i]:
+                st.markdown(f"""
+                <div class="date-picker-container">
+                    <div class="date-range-label">{column['name']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Parse current dates
+                current_start = datetime.strptime(column['start_date'], '%Y-%m-%d').date()
+                current_end = datetime.strptime(column['end_date'], '%Y-%m-%d').date()
+                
+                # Date inputs
+                new_start = st.date_input(
+                    f"Start",
+                    value=current_start,
+                    key=f"start_{column['name']}_{st.session_state.active_table}",
+                    label_visibility="collapsed"
+                )
+                
+                new_end = st.date_input(
+                    f"End",
+                    value=current_end,
+                    key=f"end_{column['name']}_{st.session_state.active_table}",
+                    label_visibility="collapsed"
+                )
+                
+                # Update dates if changed
+                if new_start != current_start or new_end != current_end:
+                    current_table['columns'][i]['start_date'] = new_start.strftime('%Y-%m-%d')
+                    current_table['columns'][i]['end_date'] = new_end.strftime('%Y-%m-%d')
+                    current_table['columns'][i]['display_name'] = f"{new_start.strftime('%m/%d')} - {new_end.strftime('%m/%d')}"
+    
+    # Data table section with toggle
+    col1, col2 = st.columns([6, 1])
+    with col1:
+        st.markdown("### Performance Data Table")
+    with col2:
+        if st.button("Show/Hide" if st.session_state.section_visibility['data_table'] else "Show/Hide", 
+                    key="toggle_data_table"):
+            st.session_state.section_visibility['data_table'] = not st.session_state.section_visibility['data_table']
+    
+    if st.session_state.section_visibility['data_table']:
+        # Create the main data table
+        table_html = "<table class='sf-table'>"
+        
+        # Header row
+        table_html += "<tr>"
+        table_html += "<th style='text-align: left; min-width: 200px;'>Metric</th>"
         
         for column in current_table['columns']:
+            table_html += f"<th style='text-align: center; min-width: 150px;'>"
+            table_html += f"<strong>{column['name']}</strong><br>"
+            table_html += f"<small style='color: #706e6b; font-weight: normal;'>{column['display_name']}</small></th>"
+        
+        table_html += "</tr>"
+        
+        # Data rows
+        for metric_key, metric in current_table['metrics'].items():
             if metric['type'] == 'calculated':
-                raw_data = {k: current_table['data'][k][column['name']] for k in current_table['data'].keys()}
-                value = calculate_metric(metric_key, raw_data)
-                formatted_value = format_value(value, metric['format'])
-                table_html += f"<td style='text-align: center;'>"
-                table_html += f"<span class='status-calculated'>🧮 {formatted_value}</span></td>"
+                row_class = "sf-table-calculated"
+                metric_icon = " (Calc)"
+            else:
+                row_class = ""
+                metric_icon = ""
+            
+            table_html += f"<tr class='{row_class}'>"
+            table_html += f"<td class='sf-table-metric'>{metric['name']}{metric_icon}</td>"
+            
+            for column in current_table['columns']:
+                if metric['type'] == 'calculated':
+                    raw_data = {k: current_table['data'][k][column['name']] for k in current_table['data'].keys()}
+                    value = calculate_metric(metric_key, raw_data)
+                    formatted_value = format_value(value, metric['format'])
+                    table_html += f"<td style='text-align: center;'>"
+                    table_html += f"<span class='status-calculated'>CALC {formatted_value}</span></td>"
+                else:
+                    value = current_table['data'][metric_key][column['name']]
+                    formatted_value = format_value(value, metric['format'])
+                    
+                    # Add data source indicator
+                    source = current_table.get('data_source', {}).get(metric_key, {}).get(column['name'], 'manual')
+                    
+                    if source == 'api':
+                        cell_class = "sf-table-api"
+                        status_html = f"<span class='status-api'>API {formatted_value}</span>"
+                    else:
+                        cell_class = ""
+                        status_html = f"<span class='status-manual'>MANUAL {formatted_value}</span>"
+                    
+                    table_html += f"<td class='{cell_class}' style='text-align: center;'>{status_html}</td>"
+            
+            table_html += "</tr>"
+        
+        table_html += "</table>"
+        
+        # Legend
+        st.markdown("""
+        <div class="legend">
+            <div class="legend-item">
+                <span class="status-calculated">CALC Auto-calculated</span>
+            </div>
+            <div class="legend-item">
+                <span class="status-api">API From Facebook API</span>
+            </div>
+            <div class="legend-item">
+                <span class="status-manual">MANUAL Manual input</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Display the HTML table
+        st.markdown(table_html, unsafe_allow_html=True)html += f"<span class='status-calculated'>🧮 {formatted_value}</span></td>"
             else:
                 value = current_table['data'][metric_key][column['name']]
                 formatted_value = format_value(value, metric['format'])
@@ -1020,118 +1096,144 @@ def main():
     # Display the HTML table
     st.markdown(table_html, unsafe_allow_html=True)
     
-    # Editable inputs section
-    st.markdown("""
-    <div class="sf-card">
-        <div class="sf-card-header">
-            <h3 class="sf-card-title">✏️ Edit Raw Metrics</h3>
+    # Editable inputs section with toggle
+    col1, col2 = st.columns([6, 1])
+    with col1:
+        st.markdown("### Edit Raw Metrics")
+    with col2:
+        if st.button("Show/Hide" if st.session_state.section_visibility['edit_metrics'] else "Show/Hide", 
+                    key="toggle_edit_metrics"):
+            st.session_state.section_visibility['edit_metrics'] = not st.session_state.section_visibility['edit_metrics']
+    
+    if st.session_state.section_visibility['edit_metrics']:
+        st.markdown("""
+        <div class="sf-card">
+            <div class="sf-card-header">
+                <h3 class="sf-card-title">Edit Raw Metrics</h3>
+            </div>
+            <p><em>Only raw metrics can be edited. Calculated metrics update automatically. API data can be overridden.</em></p>
         </div>
-        <p><em>Only raw metrics can be edited. Calculated metrics (🧮) update automatically. API data (🤖) can be overridden.</em></p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Create input fields for raw metrics only
-    raw_metrics = {k: v for k, v in current_table['metrics'].items() if v['type'] == 'raw'}
-    
-    if raw_metrics:
-        # Column headers for inputs
-        input_cols = st.columns(len(current_table['columns']))
-        for i, column in enumerate(current_table['columns']):
-            input_cols[i].markdown(f"**{column['name']}**")
-            input_cols[i].caption(column['display_name'])
+        """, unsafe_allow_html=True)
         
-        # Input fields for each raw metric
-        for metric_key, metric in raw_metrics.items():
-            st.markdown(f"### {metric['name']}")
+        # Create input fields for raw metrics only
+        raw_metrics = {k: v for k, v in current_table['metrics'].items() if v['type'] == 'raw'}
+        
+        if raw_metrics:
+            # Column headers for inputs
             input_cols = st.columns(len(current_table['columns']))
-            
             for i, column in enumerate(current_table['columns']):
-                current_value = current_table['data'][metric_key][column['name']]
-                source = current_table.get('data_source', {}).get(metric_key, {}).get(column['name'], 'manual')
+                input_cols[i].markdown(f"**{column['name']}**")
+                input_cols[i].caption(column['display_name'])
+            
+            # Input fields for each raw metric
+            for metric_key, metric in raw_metrics.items():
+                st.markdown(f"### {metric['name']}")
+                input_cols = st.columns(len(current_table['columns']))
                 
-                # Show different styling for API vs manual data
-                help_text = "🤖 API data (you can override)" if source == 'api' else "✋ Manual input"
-                
-                new_value = input_cols[i].number_input(
-                    f"{metric['name']} - {column['name']}",
-                    value=float(current_value),
-                    step=0.01,
-                    key=f"input_{metric_key}_{column['name']}_{st.session_state.active_table}",
-                    label_visibility="collapsed",
-                    help=help_text
-                )
-                
-                # Update data and mark as manual if changed
-                if new_value != current_value:
-                    current_table['data'][metric_key][column['name']] = new_value
-                    current_table['data_source'][metric_key][column['name']] = 'manual'
+                for i, column in enumerate(current_table['columns']):
+                    current_value = current_table['data'][metric_key][column['name']]
+                    source = current_table.get('data_source', {}).get(metric_key, {}).get(column['name'], 'manual')
+                    
+                    # Show different styling for API vs manual data
+                    help_text = "API data (you can override)" if source == 'api' else "Manual input"
+                    
+                    new_value = input_cols[i].number_input(
+                        f"{metric['name']} - {column['name']}",
+                        value=float(current_value),
+                        step=0.01,
+                        key=f"input_{metric_key}_{column['name']}_{st.session_state.active_table}",
+                        label_visibility="collapsed",
+                        help=help_text
+                    )
+                    
+                    # Update data and mark as manual if changed
+                    if new_value != current_value:
+                        current_table['data'][metric_key][column['name']] = new_value
+                        current_table['data_source'][metric_key][column['name']] = 'manual'
     
-    # Quick stats
-    st.markdown("""
-    <div class="sf-card">
-        <div class="sf-card-header">
-            <h3 class="sf-card-title">📈 Quick Stats (Current Week)</h3>
+    # Quick stats section with toggle
+    col1, col2 = st.columns([6, 1])
+    with col1:
+        st.markdown("### Quick Stats (Current Week)")
+    with col2:
+        if st.button("Show/Hide" if st.session_state.section_visibility['quick_stats'] else "Show/Hide", 
+                    key="toggle_quick_stats"):
+            st.session_state.section_visibility['quick_stats'] = not st.session_state.section_visibility['quick_stats']
+    
+    if st.session_state.section_visibility['quick_stats']:
+        st.markdown("""
+        <div class="sf-card">
+            <div class="sf-card-header">
+                <h3 class="sf-card-title">Quick Stats (Current Week)</h3>
+            </div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+        
+        if current_table['columns']:
+            current_week = current_table['columns'][-1]['name']  # Most recent week
+            week_data = {k: current_table['data'][k][current_week] for k in current_table['data'].keys()}
+            
+            # Create metrics cards
+            st.markdown('<div class="metrics-grid">', unsafe_allow_html=True)
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                spend = week_data.get('spend', 0)
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-value">{format_value(spend, 'currency')}</div>
+                    <div class="metric-label">Total Spend</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                clicks = week_data.get('clicks', 0)
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-value">{format_value(clicks, 'number')}</div>
+                    <div class="metric-label">Total Clicks</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col3:
+                ctr = calculate_metric('ctr', week_data)
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-value">{format_value(ctr, 'percentage')}</div>
+                    <div class="metric-label">CTR</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col4:
+                roas = calculate_metric('roas', week_data)
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-value">{format_value(roas, 'ratio')}</div>
+                    <div class="metric-label">ROAS</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            st.markdown('</div>', unsafe_allow_html=True)
     
-    if current_table['columns']:
-        current_week = current_table['columns'][-1]['name']  # Most recent week
-        week_data = {k: current_table['data'][k][current_week] for k in current_table['data'].keys()}
-        
-        # Create metrics cards
-        st.markdown('<div class="metrics-grid">', unsafe_allow_html=True)
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            spend = week_data.get('spend', 0)
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value">{format_value(spend, 'currency')}</div>
-                <div class="metric-label">Total Spend</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            clicks = week_data.get('clicks', 0)
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value">{format_value(clicks, 'number')}</div>
-                <div class="metric-label">Total Clicks</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
-            ctr = calculate_metric('ctr', week_data)
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value">{format_value(ctr, 'percentage')}</div>
-                <div class="metric-label">CTR</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col4:
-            roas = calculate_metric('roas', week_data)
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value">{format_value(roas, 'ratio')}</div>
-                <div class="metric-label">ROAS</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+    # Instructions section with toggle
+    col1, col2 = st.columns([6, 1])
+    with col1:
+        st.markdown("### How to Use Facebook Integration")
+    with col2:
+        if st.button("Show/Hide" if st.session_state.section_visibility['instructions'] else "Show/Hide", 
+                    key="toggle_instructions"):
+            st.session_state.section_visibility['instructions'] = not st.session_state.section_visibility['instructions']
     
-    # Instructions
-    st.markdown("""
-    <div class="sf-card">
-        <div class="sf-card-header">
-            <h3 class="sf-card-title">📋 How to Use Facebook Integration</h3>
+    if st.session_state.section_visibility['instructions']:
+        st.markdown("""
+        <div class="sf-card">
+            <div class="sf-card-header">
+                <h3 class="sf-card-title">How to Use Facebook Integration</h3>
+            </div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    with st.expander("Click to see detailed instructions", expanded=False):
+        """, unsafe_allow_html=True)
+        
         st.markdown("""
         ### Facebook API Setup:
         1. **Get Access Token**: Go to Facebook Graph API Explorer and generate an access token with ads_read permissions
@@ -1146,9 +1248,9 @@ def main():
         - **API Compatibility**: Facebook API will pull data for the exact date ranges you specify
         
         ### Data Sources:
-        - 🤖 **API Data**: Automatically pulled from Facebook (green background)
-        - ✋ **Manual Data**: Entered by you (white background)
-        - 🧮 **Calculated**: Auto-calculated from raw data (blue background)
+        - **API Data**: Automatically pulled from Facebook (green background)
+        - **Manual Data**: Entered by you (white background)
+        - **Calculated**: Auto-calculated from raw data (blue background)
         
         ### Editing Data:
         - **Override API Data**: You can always edit API data in the input fields below
