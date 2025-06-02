@@ -1057,7 +1057,7 @@ def main():
         """, unsafe_allow_html=True)
         
         # Display the HTML table
-             st.markdown(table_html, unsafe_allow_html=True)
+  st.markdown(table_html, unsafe_allow_html=True)
             else:
                 value = current_table['data'][metric_key][column['name']]
                 formatted_value = format_value(value, metric['format'])
