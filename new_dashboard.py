@@ -53,25 +53,33 @@ st.markdown("""
     background: linear-gradient(135deg, #ff6952 0%, #e55a47 100%);
     color: white;
     border: none;
-    border-radius: 8px;
-    padding: 0.5rem 1.5rem;
-    font-weight: 600;
-    font-size: 0.875rem;
+    border-radius: 6px;
+    padding: 0.4rem 0.8rem;
+    font-weight: 500;
+    font-size: 0.8rem;
     transition: all 0.2s ease;
-    box-shadow: 0 2px 4px rgba(255, 105, 82, 0.2);
-    text-transform: uppercase;
-    letter-spacing: 0.025em;
-    width: 100%;
+    box-shadow: 0 1px 3px rgba(255, 105, 82, 0.2);
+    width: auto;
+    min-width: 80px;
+    height: 32px;
 }
 
 .stButton > button:hover {
     background: linear-gradient(135deg, #e55a47 0%, #d14a37 100%);
     transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(255, 105, 82, 0.3);
+    box-shadow: 0 2px 6px rgba(255, 105, 82, 0.3);
 }
 
 .stButton > button:active {
     transform: translateY(0);
+}
+
+/* Small button variant */
+.small-btn > button {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    min-width: 60px;
+    height: 28px;
 }
 
 /* Secondary button styling */
@@ -235,6 +243,17 @@ if 'facebook_token' not in st.session_state:
     st.session_state.facebook_token = ''
 if 'facebook_account_id' not in st.session_state:
     st.session_state.facebook_account_id = ''
+if 'date_ranges' not in st.session_state:
+    # Initialize with default date ranges (last 4 weeks)
+    today = datetime.now()
+    st.session_state.date_ranges = {}
+    for i in range(4):
+        week_end = today - timedelta(days=7*i)
+        week_start = week_end - timedelta(days=6)
+        st.session_state.date_ranges[f'Week {4-i}'] = {
+            'start': week_start.date(),
+            'end': week_end.date()
+        }
 
 # Facebook API Integration
 class FacebookAPI:
@@ -338,25 +357,20 @@ def get_sample_data():
     }
 
 def get_facebook_data():
-    """Get Facebook data from API or sample"""
+    """Get Facebook data from API or sample with custom date ranges"""
     if st.session_state.facebook_connected and st.session_state.facebook_token and st.session_state.facebook_account_id:
         try:
             fb_api = FacebookAPI(st.session_state.facebook_token, st.session_state.facebook_account_id)
             
-            # Get data for each week
+            # Get data for each week using custom date ranges
             facebook_data = {}
-            today = datetime.now()
             
-            for i in range(4):
-                week_end = today - timedelta(days=7*i)
-                week_start = week_end - timedelta(days=6)
-                
+            for week, date_range in st.session_state.date_ranges.items():
                 week_data = fb_api.get_insights(
-                    week_start.strftime('%Y-%m-%d'),
-                    week_end.strftime('%Y-%m-%d')
+                    date_range['start'].strftime('%Y-%m-%d'),
+                    date_range['end'].strftime('%Y-%m-%d')
                 )
-                
-                facebook_data[f'Week {4-i}'] = week_data
+                facebook_data[week] = week_data
             
             return facebook_data
         except Exception as e:
@@ -389,7 +403,7 @@ def calculate_metrics(week_data):
     }
 
 def create_metrics_table(platform_data):
-    """Create metrics table"""
+    """Create metrics table with custom date ranges in headers"""
     metrics_list = [
         {'name': 'Spend', 'key': 'spend', 'format': 'currency'},
         {'name': 'Impressions', 'key': 'impressions', 'format': 'number'},
@@ -408,14 +422,18 @@ def create_metrics_table(platform_data):
             week_metrics = calculate_metrics(platform_data[week])
             value = week_metrics[metric['key']]
             
+            # Create column header with date range
+            date_range = st.session_state.date_ranges[week]
+            column_header = f"{week}\n({date_range['start'].strftime('%m/%d')} - {date_range['end'].strftime('%m/%d')})"
+            
             if metric['format'] == 'currency':
-                row[week] = f"${value:,.2f}"
+                row[column_header] = f"${value:,.2f}"
             elif metric['format'] == 'percentage':
-                row[week] = f"{value:.2f}%"
+                row[column_header] = f"{value:.2f}%"
             elif metric['format'] == 'number':
-                row[week] = f"{int(value):,}"
+                row[column_header] = f"{int(value):,}"
             else:
-                row[week] = f"{value:.2f}"
+                row[column_header] = f"{value:.2f}"
         table_data.append(row)
     
     return pd.DataFrame(table_data)
@@ -482,8 +500,41 @@ def main():
     
     st.markdown("---")
     
+    # Date Range Configuration
+    with st.expander("Configure Date Ranges for Each Column", expanded=False):
+        st.markdown("**Customize the date range for each week column:**")
+        
+        cols = st.columns(4)
+        for i, (week, date_range) in enumerate(st.session_state.date_ranges.items()):
+            with cols[i]:
+                st.markdown(f"**{week}**")
+                
+                new_start = st.date_input(
+                    "Start",
+                    value=date_range['start'],
+                    key=f"start_{week}",
+                    label_visibility="collapsed"
+                )
+                
+                new_end = st.date_input(
+                    "End", 
+                    value=date_range['end'],
+                    key=f"end_{week}",
+                    label_visibility="collapsed"
+                )
+                
+                if st.button("Update", key=f"update_{week}", help=f"Update {week} date range"):
+                    st.session_state.date_ranges[week] = {
+                        'start': new_start,
+                        'end': new_end
+                    }
+                    st.success(f"{week} updated!")
+                    st.rerun()
+                
+                st.caption(f"{date_range['start'].strftime('%m/%d')} - {date_range['end'].strftime('%m/%d')}")
+    
     # Platform and controls
-    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
     
     with col1:
         platforms = ['Facebook', 'Google Ads', 'LinkedIn']
@@ -491,16 +542,22 @@ def main():
         st.session_state.selected_platform = selected_platform
     
     with col2:
-        if st.button("Refresh Data"):
+        st.markdown('<div class="small-btn">', unsafe_allow_html=True)
+        if st.button("Refresh"):
             st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
     
     with col3:
-        if st.button("Export CSV"):
-            st.success("Export functionality ready!")
+        st.markdown('<div class="small-btn">', unsafe_allow_html=True)
+        if st.button("Export"):
+            st.success("Export ready!")
+        st.markdown('</div>', unsafe_allow_html=True)
     
     with col4:
-        if st.button("Generate Report"):
+        st.markdown('<div class="small-btn">', unsafe_allow_html=True)
+        if st.button("Report"):
             st.success("Report generated!")
+        st.markdown('</div>', unsafe_allow_html=True)
     
     st.markdown("---")
     
@@ -596,17 +653,23 @@ def main():
         
         st.markdown('<h3 class="section-header">Quick Actions</h3>', unsafe_allow_html=True)
         
-        if st.button("Sync All Data", key="sync"):
+        st.markdown('<div class="small-btn">', unsafe_allow_html=True)
+        if st.button("Sync Data", key="sync"):
             if selected_platform == 'Facebook' and st.session_state.facebook_connected:
-                st.success("Facebook data synced successfully!")
+                st.success("Facebook data synced!")
             else:
                 st.success("Data sync completed!")
+        st.markdown('</div>', unsafe_allow_html=True)
         
+        st.markdown('<div class="small-btn">', unsafe_allow_html=True)
         if st.button("Email Report", key="email"):
-            st.success("Report emailed to stakeholders!")
+            st.success("Report emailed!")
+        st.markdown('</div>', unsafe_allow_html=True)
         
-        if st.button("Schedule Sync", key="schedule"):
-            st.success("Auto-sync scheduled for daily updates!")
+        st.markdown('<div class="small-btn">', unsafe_allow_html=True)
+        if st.button("Auto-Sync", key="schedule"):
+            st.success("Auto-sync enabled!")
+        st.markdown('</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
