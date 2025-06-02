@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+import requests
+import json
 
 # Page config
 st.set_page_config(
@@ -14,6 +16,8 @@ if 'tables' not in st.session_state:
     st.session_state.tables = {}
 if 'active_table' not in st.session_state:
     st.session_state.active_table = 'facebook'
+if 'facebook_credentials' not in st.session_state:
+    st.session_state.facebook_credentials = {'token': '', 'account_id': ''}
 
 # Default metrics with calculation formulas
 DEFAULT_METRICS = {
@@ -92,6 +96,118 @@ def calculate_metric(metric_key, raw_data):
     except:
         return 0
 
+class FacebookAPI:
+    def __init__(self, access_token, account_id):
+        self.access_token = access_token
+        self.account_id = account_id
+        self.base_url = "https://graph.facebook.com/v18.0"
+    
+    def get_insights(self, start_date, end_date):
+        """Fetch Facebook Ads insights for specific date range"""
+        
+        # Define the fields we want
+        fields = [
+            'spend',
+            'impressions', 
+            'clicks',
+            'cpm',
+            'cpc', 
+            'ctr',
+            'actions',
+            'action_values'
+        ]
+        
+        params = {
+            'access_token': self.access_token,
+            'fields': ','.join(fields),
+            'time_range': json.dumps({
+                'since': start_date,
+                'until': end_date
+            }),
+            'level': 'account',
+            'time_increment': 1
+        }
+        
+        url = f"{self.base_url}/act_{self.account_id}/insights"
+        
+        try:
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            if 'data' in data and len(data['data']) > 0:
+                return self.process_facebook_data(data['data'])
+            else:
+                return self.get_empty_metrics()
+                
+        except requests.exceptions.RequestException as e:
+            st.error(f"Facebook API Error: {str(e)}")
+            return self.get_empty_metrics()
+        except Exception as e:
+            st.error(f"Error processing Facebook data: {str(e)}")
+            return self.get_empty_metrics()
+    
+    def process_facebook_data(self, raw_data):
+        """Process Facebook API response into standardized format"""
+        metrics = self.get_empty_metrics()
+        
+        # Aggregate data across all days in the period
+        for day_data in raw_data:
+            metrics['spend'] += float(day_data.get('spend', 0))
+            metrics['impressions'] += int(day_data.get('impressions', 0))
+            metrics['clicks'] += int(day_data.get('clicks', 0))
+            
+            # Process conversion actions
+            actions = day_data.get('actions', [])
+            action_values = day_data.get('action_values', [])
+            
+            for action in actions:
+                action_type = action.get('action_type')
+                value = int(action.get('value', 0))
+                
+                if action_type == 'add_to_cart':
+                    metrics['add_to_cart'] += value
+                elif action_type == 'initiate_checkout':
+                    metrics['checkout'] += value
+                elif action_type in ['purchase', 'complete_registration']:
+                    metrics['purchase'] += value
+            
+            # Process revenue values
+            for action_value in action_values:
+                action_type = action_value.get('action_type')
+                value = float(action_value.get('value', 0))
+                
+                if action_type in ['purchase', 'complete_registration']:
+                    metrics['purchase_revenue'] += value
+        
+        return metrics
+    
+    def get_empty_metrics(self):
+        """Return empty metrics structure"""
+        return {
+            'spend': 0,
+            'impressions': 0,
+            'clicks': 0,
+            'add_to_cart': 0,
+            'checkout': 0,
+            'purchase': 0,
+            'purchase_revenue': 0
+        }
+
+def fetch_facebook_data(start_date, end_date):
+    """Fetch data from Facebook API"""
+    creds = st.session_state.facebook_credentials
+    
+    if not creds['token'] or not creds['account_id']:
+        return None
+    
+    try:
+        fb_api = FacebookAPI(creds['token'], creds['account_id'])
+        return fb_api.get_insights(start_date, end_date)
+    except Exception as e:
+        st.error(f"Error fetching Facebook data: {str(e)}")
+        return None
+
 def create_initial_table(platform):
     """Create initial table structure"""
     today = datetime.now()
@@ -111,16 +227,21 @@ def create_initial_table(platform):
     
     # Initialize data structure
     data = {}
+    data_source = {}  # Track whether data came from API or manual input
+    
     for metric_key in DEFAULT_METRICS.keys():
         data[metric_key] = {}
+        data_source[metric_key] = {}
         for week in weeks:
             data[metric_key][week['name']] = 0.0
+            data_source[metric_key][week['name']] = 'manual'  # default to manual
     
     return {
         'platform': platform,
         'columns': weeks,
         'metrics': DEFAULT_METRICS.copy(),
         'data': data,
+        'data_source': data_source,
         'summary': f"{platform} performance summary will appear here. This section can be customized with insights, recommendations, and key takeaways."
     }
 
@@ -133,14 +254,81 @@ def initialize_tables():
             for platform in platforms
         }
 
+def update_facebook_data_from_api():
+    """Update Facebook table with API data"""
+    if st.session_state.active_table != 'facebook':
+        return
+    
+    facebook_table = st.session_state.tables['facebook']
+    
+    for column in facebook_table['columns']:
+        with st.spinner(f"Fetching Facebook data for {column['display_name']}..."):
+            api_data = fetch_facebook_data(column['start_date'], column['end_date'])
+            
+            if api_data:
+                # Update raw metrics with API data
+                raw_metrics = ['spend', 'impressions', 'clicks', 'add_to_cart', 'checkout', 'purchase', 'purchase_revenue']
+                
+                for metric in raw_metrics:
+                    if metric in api_data:
+                        facebook_table['data'][metric][column['name']] = api_data[metric]
+                        facebook_table['data_source'][metric][column['name']] = 'api'
+                
+                st.success(f"✅ Updated {column['name']} with Facebook API data")
+            else:
+                st.warning(f"⚠️ Could not fetch data for {column['name']}")
+
 def main():
     # Initialize tables
     initialize_tables()
     
     # Header
     st.title("🚀 Ultimate Ad Reporting Dashboard")
-    st.markdown("Generate week-over-week performance reports with customizable metrics and date ranges")
+    st.markdown("Generate week-over-week performance reports with automated Facebook data and customizable metrics")
     st.markdown("---")
+    
+    # Facebook API Configuration
+    with st.sidebar:
+        st.header("🔧 Facebook API Configuration")
+        
+        fb_token = st.text_input(
+            "Facebook Access Token:",
+            value=st.session_state.facebook_credentials['token'],
+            type="password",
+            help="Get from Facebook Graph API Explorer"
+        )
+        
+        fb_account_id = st.text_input(
+            "Facebook Account ID:",
+            value=st.session_state.facebook_credentials['account_id'],
+            help="Your ad account ID (numbers only, no 'act_' prefix)"
+        )
+        
+        # Update credentials
+        st.session_state.facebook_credentials['token'] = fb_token
+        st.session_state.facebook_credentials['account_id'] = fb_account_id
+        
+        # Test connection
+        if st.button("🧪 Test Facebook Connection"):
+            if fb_token and fb_account_id:
+                test_data = fetch_facebook_data("2024-01-01", "2024-01-01")
+                if test_data is not None:
+                    st.success("✅ Facebook API connected successfully!")
+                else:
+                    st.error("❌ Facebook API connection failed")
+            else:
+                st.warning("⚠️ Please enter both token and account ID")
+        
+        st.markdown("---")
+        
+        # Facebook Auto-Pull
+        if st.session_state.active_table == 'facebook':
+            st.subheader("📡 Auto-Pull Facebook Data")
+            if st.button("🔄 Fetch All Facebook Data", type="primary"):
+                if fb_token and fb_account_id:
+                    update_facebook_data_from_api()
+                else:
+                    st.error("❌ Please configure Facebook credentials first")
     
     # Platform selection
     platforms = list(st.session_state.tables.keys())
@@ -200,7 +388,11 @@ def main():
                 else:
                     value = current_table['data'][metric_key][column['name']]
                 
-                row[f"{column['name']} ({column['display_name']})"] = format_value(value, metric['format'])
+                # Add data source indicator
+                source = current_table.get('data_source', {}).get(metric_key, {}).get(column['name'], 'manual')
+                source_indicator = " 🤖" if source == 'api' else ""
+                
+                row[f"{column['name']} ({column['display_name']})"] = format_value(value, metric['format']) + source_indicator
             export_data.append(row)
         
         df_export = pd.DataFrame(export_data)
@@ -233,6 +425,9 @@ def main():
                         current_table['data'][metric_key] = {
                             col['name']: 0.0 for col in current_table['columns']
                         }
+                        current_table['data_source'][metric_key] = {
+                            col['name']: 'manual' for col in current_table['columns']
+                        }
                         st.success(f"Added metric: {new_metric_name}")
                         st.rerun()
     
@@ -259,6 +454,7 @@ def main():
                         # Add data for new column
                         for metric_key in current_table['data']:
                             current_table['data'][metric_key][new_column_name] = 0.0
+                            current_table['data_source'][metric_key][new_column_name] = 'manual'
                         
                         st.success(f"Added column: {new_column_name}")
                         st.rerun()
@@ -298,18 +494,29 @@ def main():
             else:
                 value = current_table['data'][metric_key][column['name']]
                 formatted_value = format_value(value, metric['format'])
-                table_html += f"<td style='text-align: center; padding: 12px; border-right: 1px solid #ddd;'>{formatted_value}</td>"
+                
+                # Add API indicator
+                source = current_table.get('data_source', {}).get(metric_key, {}).get(column['name'], 'manual')
+                api_indicator = " 🤖" if source == 'api' else ""
+                cell_bg = "#e8f5e8" if source == 'api' else "#ffffff"
+                
+                table_html += f"<td style='text-align: center; padding: 12px; border-right: 1px solid #ddd; background-color: {cell_bg};'>{formatted_value}{api_indicator}</td>"
         
         table_html += "</tr>"
     
     table_html += "</table>"
+    
+    # Legend
+    st.markdown("""
+    **Legend:** 🧮 = Auto-calculated | 🤖 = From Facebook API | 🟢 = API data | No icon = Manual input
+    """)
     
     # Display the HTML table
     st.markdown(table_html, unsafe_allow_html=True)
     
     # Editable inputs section
     st.subheader("✏️ Edit Raw Metrics")
-    st.markdown("*Only raw metrics can be edited. Calculated metrics (🧮) update automatically.*")
+    st.markdown("*Only raw metrics can be edited. Calculated metrics (🧮) update automatically. API data (🤖) can be overridden.*")
     
     # Create input fields for raw metrics only
     raw_metrics = {k: v for k, v in current_table['metrics'].items() if v['type'] == 'raw'}
@@ -329,14 +536,24 @@ def main():
             
             for i, column in enumerate(current_table['columns']):
                 current_value = current_table['data'][metric_key][column['name']]
+                source = current_table.get('data_source', {}).get(metric_key, {}).get(column['name'], 'manual')
+                
+                # Show different styling for API vs manual data
+                help_text = "🤖 API data (you can override)" if source == 'api' else "Manual input"
+                
                 new_value = cols[i].number_input(
                     f"{metric['name']} - {column['name']}",
                     value=float(current_value),
                     step=0.01,
                     key=f"input_{metric_key}_{column['name']}_{st.session_state.active_table}",
-                    label_visibility="collapsed"
+                    label_visibility="collapsed",
+                    help=help_text
                 )
-                current_table['data'][metric_key][column['name']] = new_value
+                
+                # Update data and mark as manual if changed
+                if new_value != current_value:
+                    current_table['data'][metric_key][column['name']] = new_value
+                    current_table['data_source'][metric_key][column['name']] = 'manual'
     
     # Quick stats
     st.markdown("---")
@@ -366,31 +583,31 @@ def main():
     
     # Instructions
     st.markdown("---")
-    st.subheader("📋 How to Use")
+    st.subheader("📋 How to Use Facebook Integration")
     with st.expander("Click to see instructions"):
         st.markdown("""
-        **Getting Started:**
-        1. Select a platform from the dropdown (Facebook, Google, etc.)
-        2. Edit the platform summary to add insights and notes
-        3. Enter your data in the "Edit Raw Metrics" section below the table
-        4. Watch calculated metrics (🧮) update automatically
+        **Facebook API Setup:**
+        1. Enter your Facebook Access Token and Account ID in the sidebar
+        2. Click "Test Facebook Connection" to verify it works
+        3. Click "Fetch All Facebook Data" to pull data for all weeks
         
-        **Customization:**
-        - **Add Custom Metric**: Create your own metrics like "Brand Awareness Score"
-        - **Add Custom Column**: Add custom time periods or campaigns
-        - **Export CSV**: Download your data for external analysis
-        - **Reset Table**: Clear all data and start fresh
+        **Data Sources:**
+        - 🤖 **API Data**: Automatically pulled from Facebook (shown with green background)
+        - **Manual Data**: Entered by you (white background)
+        - 🧮 **Calculated**: Auto-calculated from raw data (blue background)
         
-        **Calculated Metrics (🧮):**
-        - CTR = (Clicks ÷ Impressions) × 100
-        - CPM = (Spend ÷ Impressions) × 1000  
-        - CPC = Spend ÷ Clicks
-        - ROAS = Purchase Revenue ÷ Spend
-        - And more...
+        **Editing:**
+        - You can always override API data by editing the input fields below
+        - Once you edit API data, it becomes manual data
+        - Calculated metrics update automatically when raw data changes
+        
+        **Facebook Metrics Pulled:**
+        - Spend, Impressions, Clicks (always available)
+        - Add to Cart, Checkout, Purchases, Purchase Revenue (if configured in Facebook)
         
         **Next Steps:**
-        - Use this dashboard for manual reporting while setting up API automation
-        - Later we can connect Facebook, Google, and other platform APIs to auto-fill data
+        - Use this for Facebook reporting while setting up other platform APIs
+        - All your customization features still work (add metrics, columns, export, etc.)
         """)
 
 if __name__ == "__main__":
